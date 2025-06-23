@@ -1,0 +1,21 @@
+proto
+ Copy code
+
+syntax = "proto3";
+
+package user;
+
+service UserService {
+  rpc SaveUser (UserRequest) returns (UserResponse);
+}
+
+message UserRequest {
+  string name = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message UserResponse {
+  bool success = 1;
+  string message = 2;
+}
