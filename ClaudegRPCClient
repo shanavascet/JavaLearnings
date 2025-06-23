@@ -1,0 +1,396 @@
+// 1. gRPC Client Configuration (src/main/java/com/example/config/GrpcClientConfig.java)
+package com.example.config;
+
+import com.example.grpc.UserServiceGrpc;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class GrpcClientConfig {
+    
+    @Value("${grpc.client.user-service.host:localhost}")
+    private String grpcHost;
+    
+    @Value("${grpc.client.user-service.port:9000}")
+    private int grpcPort;
+    
+    @Bean
+    public ManagedChannel userServiceChannel() {
+        return ManagedChannelBuilder.forAddress(grpcHost, grpcPort)
+                .usePlaintext()
+                .build();
+    }
+    
+    @Bean
+    public UserServiceGrpc.UserServiceBlockingStub userServiceBlockingStub(ManagedChannel channel) {
+        return UserServiceGrpc.newBlockingStub(channel);
+    }
+    
+    @Bean
+    public UserServiceGrpc.UserServiceStub userServiceAsyncStub(ManagedChannel channel) {
+        return UserServiceGrpc.newStub(channel);
+    }
+}
+
+// 2. User Service Client (src/main/java/com/example/service/UserServiceClient.java)
+package com.example.service;
+
+import com.example.dto.UserUpdateRequest;
+import com.example.dto.UserResponse;
+import com.example.grpc.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserServiceClient {
+    
+    private static final Logger logger = LoggerFactory.getLogger(UserServiceClient.class);
+    
+    @Autowired
+    private UserServiceGrpc.UserServiceBlockingStub userServiceBlockingStub;
+    
+    public UserResponse updateUser(Long userId, UserUpdateRequest request) {
+        try {
+            logger.info("Calling gRPC service to update user: {}", userId);
+            
+            UpdateUserRequest grpcRequest = UpdateUserRequest.newBuilder()
+                    .setUserId(userId)
+                    .setEmail(request.getEmail() != null ? request.getEmail() : "")
+                    .setFirstName(request.getFirstName() != null ? request.getFirstName() : "")
+                    .setLastName(request.getLastName() != null ? request.getLastName() : "")
+                    .setPhone(request.getPhone() != null ? request.getPhone() : "")
+                    .setAddress(request.getAddress() != null ? request.getAddress() : "")
+                    .build();
+            
+            UpdateUserResponse response = userServiceBlockingStub.updateUser(grpcRequest);
+            
+            return convertToUserResponse(response);
+            
+        } catch (Exception e) {
+            logger.error("Error calling gRPC service: ", e);
+            return UserResponse.builder()
+                    .success(false)
+                    .message("Failed to update user: " + e.getMessage())
+                    .build();
+        }
+    }
+    
+    public UserResponse getUser(Long userId) {
+        try {
+            logger.info("Calling gRPC service to get user: {}", userId);
+            
+            GetUserRequest request = GetUserRequest.newBuilder()
+                    .setUserId(userId)
+                    .build();
+            
+            GetUserResponse response = userServiceBlockingStub.getUser(request);
+            
+            return convertToUserResponse(response);
+            
+        } catch (Exception e) {
+            logger.error("Error calling gRPC service: ", e);
+            return UserResponse.builder()
+                    .success(false)
+                    .message("Failed to get user: " + e.getMessage())
+                    .build();
+        }
+    }
+    
+    private UserResponse convertToUserResponse(UpdateUserResponse response) {
+        UserResponse.UserResponseBuilder builder = UserResponse.builder()
+                .success(response.getSuccess())
+                .message(response.getMessage());
+        
+        if (response.hasUser()) {
+            User grpcUser = response.getUser();
+            com.example.dto.User user = com.example.dto.User.builder()
+                    .userId(grpcUser.getUserId())
+                    .email(grpcUser.getEmail())
+                    .firstName(grpcUser.getFirstName())
+                    .lastName(grpcUser.getLastName())
+                    .phone(grpcUser.getPhone())
+                    .address(grpcUser.getAddress())
+                    .createdAt(grpcUser.getCreatedAt())
+                    .updatedAt(grpcUser.getUpdatedAt())
+                    .build();
+            builder.user(user);
+        }
+        
+        return builder.build();
+    }
+    
+    private UserResponse convertToUserResponse(GetUserResponse response) {
+        UserResponse.UserResponseBuilder builder = UserResponse.builder()
+                .success(response.getSuccess())
+                .message(response.getMessage());
+        
+        if (response.hasUser()) {
+            User grpcUser = response.getUser();
+            com.example.dto.User user = com.example.dto.User.builder()
+                    .userId(grpcUser.getUserId())
+                    .email(grpcUser.getEmail())
+                    .firstName(grpcUser.getFirstName())
+                    .lastName(grpcUser.getLastName())
+                    .phone(grpcUser.getPhone())
+                    .address(grpcUser.getAddress())
+                    .createdAt(grpcUser.getCreatedAt())
+                    .updatedAt(grpcUser.getUpdatedAt())
+                    .build();
+            builder.user(user);
+        }
+        
+        return builder.build();
+    }
+}
+
+// 3. DTOs (src/main/java/com/example/dto/UserUpdateRequest.java)
+package com.example.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Size;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserUpdateRequest {
+    
+    @Email(message = "Email should be valid")
+    private String email;
+    
+    @Size(max = 100, message = "First name should not exceed 100 characters")
+    @JsonProperty("first_name")
+    private String firstName;
+    
+    @Size(max = 100, message = "Last name should not exceed 100 characters")
+    @JsonProperty("last_name")
+    private String lastName;
+    
+    @Size(max = 20, message = "Phone should not exceed 20 characters")
+    private String phone;
+    
+    @Size(max = 500, message = "Address should not exceed 500 characters")
+    private String address;
+}
+
+// 4. User DTO (src/main/java/com/example/dto/User.java)
+package com.example.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class User {
+    
+    @JsonProperty("user_id")
+    private Long userId;
+    
+    private String email;
+    
+    @JsonProperty("first_name")
+    private String firstName;
+    
+    @JsonProperty("last_name")
+    private String lastName;
+    
+    private String phone;
+    
+    private String address;
+    
+    @JsonProperty("created_at")
+    private String createdAt;
+    
+    @JsonProperty("updated_at")
+    private String updatedAt;
+}
+
+// 5. Response DTO (src/main/java/com/example/dto/UserResponse.java)
+package com.example.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserResponse {
+    private boolean success;
+    private String message;
+    private User user;
+}
+
+// 6. REST Controller (src/main/java/com/example/controller/UserController.java)
+package com.example.controller;
+
+import com.example.dto.UserUpdateRequest;
+import com.example.dto.UserResponse;
+import com.example.service.UserServiceClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
+
+@RestController
+@RequestMapping("/api/users")
+@CrossOrigin(origins = "*")
+public class UserController {
+    
+    @Autowired
+    private UserServiceClient userServiceClient;
+    
+    @PutMapping("/{userId}")
+    public ResponseEntity<UserResponse> updateUser(
+            @PathVariable Long userId,
+            @Valid @RequestBody UserUpdateRequest request) {
+        
+        UserResponse response = userServiceClient.updateUser(userId, request);
+        
+        if (response.isSuccess()) {
+            return ResponseEntity.ok(response);
+        } else {
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
+    @GetMapping("/{userId}")
+    public ResponseEntity<UserResponse> getUser(@PathVariable Long userId) {
+        UserResponse response = userServiceClient.getUser(userId);
+        
+        if (response.isSuccess()) {
+            return ResponseEntity.ok(response);
+        } else {
+            return ResponseEntity.notFound().build();
+        }
+    }
+}
+
+// 7. Application Properties (src/main/resources/application.yml)
+server:
+  port: 8080
+
+grpc:
+  client:
+    user-service:
+      host: localhost
+      port: 9000
+
+logging:
+  level:
+    com.example: DEBUG
+    io.grpc: INFO
+
+// 8. Maven Dependencies (pom.xml)
+<!--
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    
+    <!-- gRPC dependencies -->
+    <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-netty-shaded</artifactId>
+        <version>1.58.0</version>
+    </dependency>
+    
+    <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-protobuf</artifactId>
+        <version>1.58.0</version>
+    </dependency>
+    
+    <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-stub</artifactId>
+        <version>1.58.0</version>
+    </dependency>
+    
+    <!-- Protobuf -->
+    <dependency>
+        <groupId>com.google.protobuf</groupId>
+        <artifactId>protobuf-java</artifactId>
+        <version>3.24.4</version>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <optional>true</optional>
+    </dependency>
+</dependencies>
+
+<build>
+    <extensions>
+        <extension>
+            <groupId>kr.motd.maven</groupId>
+            <artifactId>os-maven-plugin</artifactId>
+            <version>1.7.1</version>
+        </extension>
+    </extensions>
+    
+    <plugins>
+        <plugin>
+            <groupId>org.xolstice.maven.plugins</groupId>
+            <artifactId>protobuf-maven-plugin</artifactId>
+            <version>0.6.1</version>
+            <configuration>
+                <protocArtifact>com.google.protobuf:protoc:3.24.4:exe:${os.detected.classifier}</protocArtifact>
+                <pluginId>grpc-java</pluginId>
+                <pluginArtifact>io.grpc:protoc-gen-grpc-java:1.58.0:exe:${os.detected.classifier}</pluginArtifact>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>compile</goal>
+                        <goal>compile-custom</goal>
+                    </goals>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+-->
+
+// 9. Testing Examples
+
+// Test with curl:
+// Update user:
+// curl -X PUT http://localhost:8080/api/users/1 \
+//   -H "Content-Type: application/json" \
+//   -d '{
+//     "email": "john.updated@example.com",
+//     "first_name": "John Updated",
+//     "last_name": "Doe Updated",
+//     "phone": "+1234567890",
+//     "address": "456 Updated St, City, State"
+//   }'
+
+// Get user:
+// curl -X GET http://localhost:8080/api/users/1
