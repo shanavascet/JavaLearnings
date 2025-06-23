@@ -1,0 +1,344 @@
+// 1. Proto file (src/main/proto/user_service.proto)
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.example.grpc";
+option java_outer_classname = "UserServiceProto";
+
+package user;
+
+service UserService {
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+}
+
+message UpdateUserRequest {
+  int64 user_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string phone = 5;
+  string address = 6;
+}
+
+message UpdateUserResponse {
+  bool success = 1;
+  string message = 2;
+  User user = 3;
+}
+
+message GetUserRequest {
+  int64 user_id = 1;
+}
+
+message GetUserResponse {
+  bool success = 1;
+  string message = 2;
+  User user = 3;
+}
+
+message User {
+  int64 user_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string phone = 5;
+  string address = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+// 2. User Entity (src/main/java/com/example/entity/User.java)
+package com.example.entity;
+
+import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "users")
+public class User extends PanacheEntityBase {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "user_id")
+    public Long userId;
+    
+    @Column(name = "email", unique = true, nullable = false)
+    public String email;
+    
+    @Column(name = "first_name")
+    public String firstName;
+    
+    @Column(name = "last_name")
+    public String lastName;
+    
+    @Column(name = "phone")
+    public String phone;
+    
+    @Column(name = "address")
+    public String address;
+    
+    @Column(name = "created_at")
+    public LocalDateTime createdAt;
+    
+    @Column(name = "updated_at")
+    public LocalDateTime updatedAt;
+    
+    @PrePersist
+    public void prePersist() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
+    }
+    
+    @PreUpdate
+    public void preUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
+    
+    public static User findByUserId(Long userId) {
+        return find("userId", userId).firstResult();
+    }
+}
+
+// 3. User Repository (src/main/java/com/example/repository/UserRepository.java)
+package com.example.repository;
+
+import com.example.entity.User;
+import io.quarkus.hibernate.orm.panache.PanacheRepository;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.transaction.Transactional;
+
+@ApplicationScoped
+public class UserRepository implements PanacheRepository<User> {
+    
+    public User findByUserId(Long userId) {
+        return find("userId", userId).firstResult();
+    }
+    
+    public User findByEmail(String email) {
+        return find("email", email).firstResult();
+    }
+    
+    @Transactional
+    public User updateUser(Long userId, String email, String firstName, 
+                          String lastName, String phone, String address) {
+        User user = findByUserId(userId);
+        if (user != null) {
+            if (email != null && !email.trim().isEmpty()) {
+                user.email = email;
+            }
+            if (firstName != null && !firstName.trim().isEmpty()) {
+                user.firstName = firstName;
+            }
+            if (lastName != null && !lastName.trim().isEmpty()) {
+                user.lastName = lastName;
+            }
+            if (phone != null && !phone.trim().isEmpty()) {
+                user.phone = phone;
+            }
+            if (address != null && !address.trim().isEmpty()) {
+                user.address = address;
+            }
+            user.persist();
+        }
+        return user;
+    }
+}
+
+// 4. gRPC Service Implementation (src/main/java/com/example/service/UserGrpcService.java)
+package com.example.service;
+
+import com.example.entity.User;
+import com.example.grpc.*;
+import com.example.repository.UserRepository;
+import io.quarkus.grpc.GrpcService;
+import io.smallrye.mutiny.Uni;
+import jakarta.inject.Inject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@GrpcService
+public class UserGrpcService implements UserService {
+    
+    private static final Logger logger = LoggerFactory.getLogger(UserGrpcService.class);
+    
+    @Inject
+    UserRepository userRepository;
+    
+    @Override
+    public Uni<UpdateUserResponse> updateUser(UpdateUserRequest request) {
+        return Uni.createFrom().item(() -> {
+            try {
+                logger.info("Updating user with ID: {}", request.getUserId());
+                
+                // Validate request
+                if (request.getUserId() <= 0) {
+                    return UpdateUserResponse.newBuilder()
+                            .setSuccess(false)
+                            .setMessage("Invalid user ID")
+                            .build();
+                }
+                
+                // Update user
+                User updatedUser = userRepository.updateUser(
+                    request.getUserId(),
+                    request.getEmail(),
+                    request.getFirstName(),
+                    request.getLastName(),
+                    request.getPhone(),
+                    request.getAddress()
+                );
+                
+                if (updatedUser == null) {
+                    return UpdateUserResponse.newBuilder()
+                            .setSuccess(false)
+                            .setMessage("User not found")
+                            .build();
+                }
+                
+                // Convert to gRPC User
+                com.example.grpc.User grpcUser = convertToGrpcUser(updatedUser);
+                
+                return UpdateUserResponse.newBuilder()
+                        .setSuccess(true)
+                        .setMessage("User updated successfully")
+                        .setUser(grpcUser)
+                        .build();
+                        
+            } catch (Exception e) {
+                logger.error("Error updating user: ", e);
+                return UpdateUserResponse.newBuilder()
+                        .setSuccess(false)
+                        .setMessage("Internal server error: " + e.getMessage())
+                        .build();
+            }
+        });
+    }
+    
+    @Override
+    public Uni<GetUserResponse> getUser(GetUserRequest request) {
+        return Uni.createFrom().item(() -> {
+            try {
+                logger.info("Getting user with ID: {}", request.getUserId());
+                
+                User user = userRepository.findByUserId(request.getUserId());
+                
+                if (user == null) {
+                    return GetUserResponse.newBuilder()
+                            .setSuccess(false)
+                            .setMessage("User not found")
+                            .build();
+                }
+                
+                com.example.grpc.User grpcUser = convertToGrpcUser(user);
+                
+                return GetUserResponse.newBuilder()
+                        .setSuccess(true)
+                        .setMessage("User retrieved successfully")
+                        .setUser(grpcUser)
+                        .build();
+                        
+            } catch (Exception e) {
+                logger.error("Error getting user: ", e);
+                return GetUserResponse.newBuilder()
+                        .setSuccess(false)
+                        .setMessage("Internal server error: " + e.getMessage())
+                        .build();
+            }
+        });
+    }
+    
+    private com.example.grpc.User convertToGrpcUser(User user) {
+        return com.example.grpc.User.newBuilder()
+                .setUserId(user.userId)
+                .setEmail(user.email != null ? user.email : "")
+                .setFirstName(user.firstName != null ? user.firstName : "")
+                .setLastName(user.lastName != null ? user.lastName : "")
+                .setPhone(user.phone != null ? user.phone : "")
+                .setAddress(user.address != null ? user.address : "")
+                .setCreatedAt(user.createdAt != null ? user.createdAt.toString() : "")
+                .setUpdatedAt(user.updatedAt != null ? user.updatedAt.toString() : "")
+                .build();
+    }
+}
+
+// 5. Application Properties (src/main/resources/application.properties)
+# Database Configuration
+quarkus.datasource.db-kind=postgresql
+quarkus.datasource.username=your_username
+quarkus.datasource.password=your_password
+quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/your_database
+
+# Hibernate Configuration
+quarkus.hibernate-orm.database.generation=update
+quarkus.hibernate-orm.log.sql=true
+
+# gRPC Configuration
+quarkus.grpc.server.port=9000
+quarkus.grpc.server.host=0.0.0.0
+
+# Logging
+quarkus.log.level=INFO
+quarkus.log.category."com.example".level=DEBUG
+
+# 6. Maven Dependencies (pom.xml additions)
+<!--
+<dependencies>
+    <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-grpc</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-hibernate-orm-panache</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-jdbc-postgresql</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-smallrye-reactive-messaging</artifactId>
+    </dependency>
+</dependencies>
+
+<build>
+    <plugins>
+        <plugin>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-maven-plugin</artifactId>
+            <version>${quarkus.platform.version}</version>
+            <extensions>true</extensions>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>build</goal>
+                        <goal>generate-code</goal>
+                        <goal>generate-code-tests</goal>
+                    </goals>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+-->
+
+// 7. Database Schema (schema.sql)
+CREATE TABLE IF NOT EXISTS users (
+    user_id BIGSERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    phone VARCHAR(20),
+    address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sample data
+INSERT INTO users (email, first_name, last_name, phone, address) 
+VALUES 
+('john.doe@example.com', 'John', 'Doe', '+1234567890', '123 Main St, City, State'),
+('jane.smith@example.com', 'Jane', 'Smith', '+0987654321', '456 Oak Ave, City, State')
+ON CONFLICT (email) DO NOTHING;
