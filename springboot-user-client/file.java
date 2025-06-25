@@ -202,15 +202,9 @@ public class ApiResponse<T> {
     }
 }
 
-// ========================================
-// src/main/java/com/springbootclient/service/UserRegistrationClientService.java
-
 package com.springbootclient.service;
 
-import com.springbootclient.dto.UserRegistrationRequest;
-import com.springbootclient.dto.UserUpdateRequest;
-import com.springbootclient.dto.UserDto;
-import com.springbootclient.dto.ApiResponse;
+import com.springbootclient.dto.*;
 import com.quarkuspoc.grpc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -221,48 +215,87 @@ import java.util.concurrent.TimeUnit;
 
 @Service
 public class UserRegistrationClientService {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(UserRegistrationClientService.class);
-    
+
     @Autowired
     private UserRegistrationServiceGrpc.UserRegistrationServiceBlockingStub userRegistrationStub;
-    
+
     public ApiResponse<UserDto> registerUser(UserRegistrationRequest request) {
         try {
             logger.info("Calling gRPC service to register user: {}", request.getEmail());
-            
+
             RegisterUserRequest grpcRequest = RegisterUserRequest.newBuilder()
                     .setEmail(request.getEmail())
                     .setPassword(request.getPassword())
-                    .setFirstName(request.getFirstName() != null ? request.getFirstName() : "")
-                    .setLastName(request.getLastName() != null ? request.getLastName() : "")
-                    .setPhone(request.getPhone() != null ? request.getPhone() : "")
-                    .setAddress(request.getAddress() != null ? request.getAddress() : "")
+                    .setFirstName(defaultIfNull(request.getFirstName()))
+                    .setLastName(defaultIfNull(request.getLastName()))
+                    .setPhone(defaultIfNull(request.getPhone()))
+                    .setAddress(defaultIfNull(request.getAddress()))
                     .build();
-            
-            RegisterUserResponse response = userRegistrationStub
+
+            RegisterUserResponse grpcResponse = userRegistrationStub
                     .withDeadlineAfter(10, TimeUnit.SECONDS)
                     .registerUser(grpcRequest);
-            
-            if (response.getSuccess()) {
-                UserDto userDto = convertToUserDto(response.getUser());
-                return ApiResponse.success(response.getMessage(), userDto);
+
+            if (grpcResponse.getSuccess()) {
+                UserDto userDto = convertToUserDto(grpcResponse.getUser());
+                return ApiResponse.success(grpcResponse.getMessage(), userDto);
             } else {
-                return ApiResponse.error(response.getMessage());
+                return ApiResponse.error(grpcResponse.getMessage());
             }
-            
+
         } catch (Exception e) {
-            logger.error("Error calling gRPC service for user registration: ", e);
-            return ApiResponse.error("Failed to register user: " + e.getMessage());
+            logger.error("gRPC error during user registration", e);
+            return ApiResponse.error("User registration failed: " + e.getMessage());
         }
     }
-    
+
     public ApiResponse<UserDto> updateUser(Long userId, UserUpdateRequest request) {
         try {
-            logger.info("Calling gRPC service to update user: {}", userId);
-            
+            logger.info("Calling gRPC service to update user ID: {}", userId);
+
             UpdateUserRequest grpcRequest = UpdateUserRequest.newBuilder()
                     .setUserId(userId)
-                    .setEmail(request.getEmail() != null ? request.getEmail() : "")
-                    .setFirstName(request.getFirstName() != null ? request.getFirstName() : "")
-                    .setLastName(request.getLastName
+                    .setEmail(defaultIfNull(request.getEmail()))
+                    .setFirstName(defaultIfNull(request.getFirstName()))
+                    .setLastName(defaultIfNull(request.getLastName()))
+                    .setPhone(defaultIfNull(request.getPhone()))
+                    .setAddress(defaultIfNull(request.getAddress()))
+                    .build();
+
+            UpdateUserResponse grpcResponse = userRegistrationStub
+                    .withDeadlineAfter(10, TimeUnit.SECONDS)
+                    .updateUser(grpcRequest);
+
+            if (grpcResponse.getSuccess()) {
+                UserDto userDto = convertToUserDto(grpcResponse.getUser());
+                return ApiResponse.success(grpcResponse.getMessage(), userDto);
+            } else {
+                return ApiResponse.error(grpcResponse.getMessage());
+            }
+
+        } catch (Exception e) {
+            logger.error("gRPC error during user update", e);
+            return ApiResponse.error("User update failed: " + e.getMessage());
+        }
+    }
+
+    private UserDto convertToUserDto(User grpcUser) {
+        return UserDto.builder()
+                .userId(grpcUser.getUserId())
+                .email(grpcUser.getEmail())
+                .firstName(grpcUser.getFirstName())
+                .lastName(grpcUser.getLastName())
+                .phone(grpcUser.getPhone())
+                .address(grpcUser.getAddress())
+                .createdAt(grpcUser.getCreatedAt())
+                .updatedAt(grpcUser.getUpdatedAt())
+                .status(grpcUser.getStatus())
+                .build();
+    }
+
+    private String defaultIfNull(String value) {
+        return value != null ? value : "";
+    }
+}
