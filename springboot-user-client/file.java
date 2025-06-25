@@ -299,3 +299,9 @@ public class UserRegistrationClientService {
         return value != null ? value : "";
     }
 }
+
+
+grpc.client.quarkus-poc.host=localhost
+grpc.client.quarkus-poc.port=9000
+server.port=8080
+
