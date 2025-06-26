@@ -342,3 +342,9 @@ VALUES
 ('john.doe@example.com', 'John', 'Doe', '+1234567890', '123 Main St, City, State'),
 ('jane.smith@example.com', 'Jane', 'Smith', '+0987654321', '456 Oak Ave, City, State')
 ON CONFLICT (email) DO NOTHING;
+
+
+====≠===============
+public Uni<List<UserRegistration>> findActiveUsers() {
+    return list("status", UserRegistration.UserStatus.ACTIVE);
+}
