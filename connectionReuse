@@ -1,0 +1,264 @@
+I don't have memory of our previous POC project since I don't retain information between conversations, but I can definitely help you understand how to ensure connection reusing in Spring Boot when connecting to a Quarkus gRPC service.
+
+By default, gRPC clients should reuse connections, but let me show you how to properly configure this to ensure optimal connection pooling:
+
+// 1. Dependencies needed in pom.xml
+/*
+<dependency>
+    <groupId>net.devh</groupId>
+    <artifactId>grpc-client-spring-boot-starter</artifactId>
+    <version>2.15.0.RELEASE</version>
+</dependency>
+*/
+
+// 2. Application Properties Configuration
+// application.yml
+/*
+grpc:
+  client:
+    quarkus-service:
+      address: 'static://localhost:9090'
+      keepAliveTime: 30s
+      keepAliveTimeout: 5s
+      keepAliveWithoutCalls: true
+      maxInboundMessageSize: 4194304
+      negotiationType: plaintext
+      # Connection pooling settings
+      channelType: 'netty'
+      netty:
+        keepAlive: true
+        keepAliveTime: 30
+        keepAliveTimeout: 5
+        keepAliveWithoutCalls: true
+        maxConnectionIdle: 60s
+        maxConnectionAge: 30s
+        maxConnectionAgeGrace: 5s
+*/
+
+// 3. gRPC Client Configuration Class
+@Configuration
+@EnableConfigurationProperties
+public class GrpcClientConfig {
+
+    @Bean
+    @GrpcClient("quarkus-service")
+    public NettyChannelBuilder channelBuilder() {
+        return NettyChannelBuilder.forAddress("localhost", 9090)
+                .keepAliveTime(30, TimeUnit.SECONDS)
+                .keepAliveTimeout(5, TimeUnit.SECONDS) 
+                .keepAliveWithoutCalls(true)
+                .maxInboundMessageSize(4 * 1024 * 1024)
+                .usePlaintext();
+    }
+
+    // Alternative: Manual Channel Management for explicit control
+    @Bean
+    public ManagedChannel grpcChannel() {
+        return NettyChannelBuilder.forAddress("localhost", 9090)
+                .keepAliveTime(30, TimeUnit.SECONDS)
+                .keepAliveTimeout(5, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(true)
+                .maxInboundMessageSize(4 * 1024 * 1024)
+                .usePlaintext()
+                .build();
+    }
+}
+
+// 4. Service Implementation with Connection Reuse
+@Service
+public class QuarkusGrpcClientService {
+
+    @GrpcClient("quarkus-service")
+    private YourServiceGrpc.YourServiceBlockingStub blockingStub;
+
+    @GrpcClient("quarkus-service") 
+    private YourServiceGrpc.YourServiceStub asyncStub;
+
+    // Alternative with manual channel management
+    @Autowired
+    private ManagedChannel channel;
+    
+    private YourServiceGrpc.YourServiceBlockingStub manualBlockingStub;
+    private YourServiceGrpc.YourServiceStub manualAsyncStub;
+
+    @PostConstruct
+    public void init() {
+        // Only if using manual channel
+        this.manualBlockingStub = YourServiceGrpc.newBlockingStub(channel);
+        this.manualAsyncStub = YourServiceGrpc.newStub(channel);
+    }
+
+    public String callQuarkusService(String request) {
+        try {
+            // Using @GrpcClient annotation (recommended)
+            YourRequest grpcRequest = YourRequest.newBuilder()
+                    .setMessage(request)
+                    .build();
+            
+            YourResponse response = blockingStub.yourMethod(grpcRequest);
+            return response.getResult();
+            
+        } catch (StatusRuntimeException e) {
+            log.error("gRPC call failed: {}", e.getStatus());
+            throw new RuntimeException("Service call failed", e);
+        }
+    }
+
+    public CompletableFuture<String> callQuarkusServiceAsync(String request) {
+        CompletableFuture<String> future = new CompletableFuture<>();
+        
+        YourRequest grpcRequest = YourRequest.newBuilder()
+                .setMessage(request)
+                .build();
+
+        asyncStub.yourMethod(grpcRequest, new StreamObserver<YourResponse>() {
+            @Override
+            public void onNext(YourResponse response) {
+                future.complete(response.getResult());
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                future.completeExceptionally(throwable);
+            }
+
+            @Override
+            public void onCompleted() {
+                // Response already handled in onNext
+            }
+        });
+
+        return future;
+    }
+}
+
+// 5. Connection Monitoring and Health Check
+@Component
+public class GrpcConnectionMonitor {
+
+    @GrpcClient("quarkus-service")
+    private Channel channel;
+
+    @Scheduled(fixedRate = 30000) // Check every 30 seconds
+    public void monitorConnection() {
+        ConnectivityState state = ((ManagedChannel) channel).getState(false);
+        log.info("gRPC Channel State: {}", state);
+        
+        if (state == ConnectivityState.TRANSIENT_FAILURE || 
+            state == ConnectivityState.SHUTDOWN) {
+            log.warn("gRPC connection issue detected. State: {}", state);
+            // Optionally trigger reconnection logic
+        }
+    }
+
+    public boolean isChannelReady() {
+        ConnectivityState state = ((ManagedChannel) channel).getState(false);
+        return state == ConnectivityState.READY;
+    }
+}
+
+// 6. Graceful Shutdown Configuration
+@Component
+public class GrpcShutdownConfig {
+
+    @Autowired
+    private ManagedChannel channel;
+
+    @PreDestroy
+    public void shutdown() {
+        if (channel != null && !channel.isShutdown()) {
+            try {
+                channel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                log.warn("gRPC channel shutdown interrupted", e);
+                channel.shutdownNow();
+            }
+        }
+    }
+}
+
+// 7. Custom Interceptor for Connection Logging (Optional)
+@Component
+public class ConnectionLoggingInterceptor implements ClientInterceptor {
+
+    @Override
+    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
+            MethodDescriptor<ReqT, RespT> method, 
+            CallOptions callOptions, 
+            Channel next) {
+        
+        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
+                next.newCall(method, callOptions)) {
+            
+            @Override
+            public void start(Listener<RespT> responseListener, Metadata headers) {
+                log.debug("Starting gRPC call to: {}", method.getFullMethodName());
+                super.start(responseListener, headers);
+            }
+        };
+    }
+}
+
+// 8. Testing Connection Reuse
+@SpringBootTest
+public class GrpcConnectionReuseTest {
+
+    @Autowired
+    private QuarkusGrpcClientService grpcService;
+
+    @Autowired
+    private GrpcConnectionMonitor connectionMonitor;
+
+    @Test
+    public void testConnectionReuse() throws InterruptedException {
+        // Make multiple calls
+        for (int i = 0; i < 10; i++) {
+            String result = grpcService.callQuarkusService("test-" + i);
+            assertNotNull(result);
+            Thread.sleep(1000); // Small delay between calls
+        }
+
+        // Verify connection is still active and reused
+        assertTrue(connectionMonitor.isChannelReady());
+    }
+}
+
+The key points for ensuring gRPC connection reuse in Spring Boot:
+
+**Connection Reuse Strategies:**
+
+1. **Use `@GrpcClient` annotation** - This automatically manages connection pooling and reuse
+2. **Configure keep-alive settings** - Prevents connections from being closed prematurely
+3. **Proper channel configuration** - Set appropriate timeouts and connection parameters
+
+**Key Configuration Options:**
+
+- `keepAliveTime`: Send keep-alive pings every 30 seconds
+- `keepAliveTimeout`: Wait 5 seconds for keep-alive response
+- `keepAliveWithoutCalls`: Keep connection alive even when idle
+- `maxConnectionIdle`: Maximum idle time before closing connection
+
+**How to Verify Connection Reuse:**
+
+1. **Enable debug logging** in `application.yml`:
+   ```yaml
+   logging:
+     level:
+       io.grpc: DEBUG
+       net.devh.boot.grpc: DEBUG
+   ```
+
+2. **Monitor connection state** using the `GrpcConnectionMonitor` component
+
+3. **Check connection metrics** - Look for connection establishment logs vs reuse
+
+**Best Practices:**
+
+- Use singleton gRPC stubs (which the framework handles automatically with `@GrpcClient`)
+- Configure appropriate keep-alive settings based on your network environment
+- Monitor connection health and implement retry logic
+- Properly shutdown channels during application shutdown
+
+The gRPC client will reuse the underlying HTTP/2 connection for multiple RPC calls, which is much more efficient than creating new connections for each request.
+
+Would you like me to help you implement any specific part of this configuration or add monitoring to verify the connection reuse behavior?
