@@ -1,0 +1,25 @@
+springboot-grpc-bridge/
+│
+├── src/
+│   ├── main/
+│   │   ├── java/com/example/grpcbridge/
+│   │   │   ├── config/
+│   │   │   │   ├── GrpcClientConfig.java
+│   │   │   │   ├── GrpcClientProperties.java
+│   │   │   ├── interceptor/
+│   │   │   │   ├── ConnectionMonitoringInterceptor.java
+│   │   │   │   ├── RetryInterceptor.java
+│   │   │   ├── service/
+│   │   │   │   ├── QuarkusUserClient.java
+│   │   │   ├── controller/
+│   │   │   │   ├── GrpcConnectionTestController.java
+│   │   │   ├── dto/
+│   │   │   │   ├── CreateUserRequestDto.java
+│   │   │   ├── SpringbootGrpcBridgeApplication.java
+│   ├── main/
+│   │   ├── resources/
+│   │   │   ├── application.yml
+│   │   │   ├── proto/
+│   │   │   │   ├── user.proto
+│
+├── pom.xml
