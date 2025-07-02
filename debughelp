@@ -1,308 +1,426 @@
 // ============================================================================
-// TROUBLESHOOTING gRPC CHANNEL CREATION ISSUES
+// CUSTOM gRPC CLIENT CONFIGURATION FOR POC
 // ============================================================================
 
-// STEP 1: Fix Configuration Issues
-// ============================================================================
-
-// Option A: Simplified GrpcClientConfig.java (Remove custom ChannelBuilder)
+// config/GrpcClientConfig.java
 @Configuration
+@EnableConfigurationProperties(GrpcClientProperties.class)
+@Slf4j
 public class GrpcClientConfig {
+
+    @Autowired
+    private GrpcClientProperties grpcProperties;
+
+    // Custom Channel Configuration with Connection Reuse
+    @Bean("quarkusUserServiceChannel")
+    @Primary
+    public ManagedChannel quarkusUserServiceChannel() {
+        log.info("Creating custom gRPC channel for user service");
+        
+        GrpcClientProperties.ServiceConfig serviceConfig = 
+            grpcProperties.getClient().get("quarkus-user-service");
+            
+        return NettyChannelBuilder
+                .forAddress(serviceConfig.getHost(), serviceConfig.getPort())
+                .keepAliveTime(serviceConfig.getKeepAliveTime(), TimeUnit.SECONDS)
+                .keepAliveTimeout(serviceConfig.getKeepAliveTimeout(), TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(serviceConfig.isKeepAliveWithoutCalls())
+                .maxInboundMessageSize(serviceConfig.getMaxInboundMessageSize())
+                .maxConnectionIdle(serviceConfig.getMaxConnectionIdle(), TimeUnit.SECONDS)
+                .maxConnectionAge(serviceConfig.getMaxConnectionAge(), TimeUnit.SECONDS)
+                .maxConnectionAgeGrace(serviceConfig.getMaxConnectionAgeGrace(), TimeUnit.SECONDS)
+                .usePlaintext()
+                // Custom settings for POC
+                .intercept(new ConnectionMonitoringInterceptor("user-service"))
+                .intercept(new RetryInterceptor(serviceConfig.getMaxRetryAttempts()))
+                .executor(customGrpcExecutor())
+                .build();
+    }
+
+    @Bean("quarkusOrderServiceChannel")
+    public ManagedChannel quarkusOrderServiceChannel() {
+        log.info("Creating custom gRPC channel for order service");
+        
+        GrpcClientProperties.ServiceConfig serviceConfig = 
+            grpcProperties.getClient().get("quarkus-order-service");
+            
+        return NettyChannelBuilder
+                .forAddress(serviceConfig.getHost(), serviceConfig.getPort())
+                .keepAliveTime(serviceConfig.getKeepAliveTime(), TimeUnit.SECONDS)
+                .keepAliveTimeout(serviceConfig.getKeepAliveTimeout(), TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(serviceConfig.isKeepAliveWithoutCalls())
+                .maxInboundMessageSize(serviceConfig.getMaxInboundMessageSize())
+                .maxConnectionIdle(serviceConfig.getMaxConnectionIdle(), TimeUnit.SECONDS)
+                .maxConnectionAge(serviceConfig.getMaxConnectionAge(), TimeUnit.SECONDS)
+                .maxConnectionAgeGrace(serviceConfig.getMaxConnectionAgeGrace(), TimeUnit.SECONDS)
+                .usePlaintext()
+                .intercept(new ConnectionMonitoringInterceptor("order-service"))
+                .intercept(new RetryInterceptor(serviceConfig.getMaxRetryAttempts()))
+                .executor(customGrpcExecutor())
+                .build();
+    }
+
+    // Custom Thread Pool for gRPC calls
+    @Bean("grpcExecutor")
+    public Executor customGrpcExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(grpcProperties.getThreadPool().getCoreSize());
+        executor.setMaxPoolSize(grpcProperties.getThreadPool().getMaxSize());
+        executor.setQueueCapacity(grpcProperties.getThreadPool().getQueueCapacity());
+        executor.setThreadNamePrefix("grpc-client-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    // Graceful shutdown
+    @PreDestroy
+    public void shutdown() {
+        log.info("Shutting down gRPC channels...");
+        
+        try {
+            ManagedChannel userChannel = (ManagedChannel) 
+                applicationContext.getBean("quarkusUserServiceChannel");
+            ManagedChannel orderChannel = (ManagedChannel) 
+                applicationContext.getBean("quarkusOrderServiceChannel");
+                
+            shutdownChannel(userChannel, "user-service");
+            shutdownChannel(orderChannel, "order-service");
+            
+        } catch (Exception e) {
+            log.error("Error during gRPC shutdown", e);
+        }
+    }
     
-    // Remove custom @Bean definitions - let Spring Boot auto-configure
-    // The @GrpcClient annotation will handle channel creation automatically
+    private void shutdownChannel(ManagedChannel channel, String serviceName) {
+        try {
+            channel.shutdown();
+            if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("Force shutting down {} channel", serviceName);
+                channel.shutdownNow();
+                channel.awaitTermination(2, TimeUnit.SECONDS);
+            }
+            log.info("Successfully shut down {} channel", serviceName);
+        } catch (InterruptedException e) {
+            log.warn("Interrupted while shutting down {} channel", serviceName);
+            channel.shutdownNow();
+        }
+    }
+
+    @Autowired
+    private ApplicationContext applicationContext;
+}
+
+// ============================================================================
+// CUSTOM PROPERTIES CONFIGURATION
+// ============================================================================
+
+@ConfigurationProperties(prefix = "grpc")
+@Data
+public class GrpcClientProperties {
     
-    // Optional: Only add custom configuration if you need specific settings
-    @Bean
-    @ConditionalOnProperty(name = "grpc.client.custom-config.enabled", havingValue = "true")
-    public NettyChannelBuilder customChannelBuilder() {
-        return NettyChannelBuilder.forAddress("localhost", 9090)
-                .keepAliveTime(30, TimeUnit.SECONDS)
-                .keepAliveTimeout(5, TimeUnit.SECONDS)
-                .keepAliveWithoutCalls(true)
-                .usePlaintext();
+    private Map<String, ServiceConfig> client = new HashMap<>();
+    private ThreadPoolConfig threadPool = new ThreadPoolConfig();
+    private PocTestConfig pocTest = new PocTestConfig();
+
+    @Data
+    public static class ServiceConfig {
+        private String host = "localhost";
+        private int port = 9090;
+        private int keepAliveTime = 30;
+        private int keepAliveTimeout = 5;
+        private boolean keepAliveWithoutCalls = true;
+        private int maxInboundMessageSize = 4 * 1024 * 1024;
+        private int maxConnectionIdle = 300; // 5 minutes
+        private int maxConnectionAge = 1800; // 30 minutes
+        private int maxConnectionAgeGrace = 5;
+        private int maxRetryAttempts = 3;
+        private boolean enableConnectionPooling = true;
+        private int connectionPoolSize = 10;
+    }
+
+    @Data
+    public static class ThreadPoolConfig {
+        private int coreSize = 5;
+        private int maxSize = 20;
+        private int queueCapacity = 100;
+    }
+
+    @Data
+    public static class PocTestConfig {
+        private boolean enableConnectionReuse = true;
+        private boolean enableDetailedLogging = true;
+        private boolean enableMetrics = true;
+        private int connectionTestInterval = 30;
+        private boolean failFast = false;
     }
 }
 
 // ============================================================================
-// STEP 2: Fix Application Properties
-// ============================================================================
-
-/*
-# application.yml - Correct Configuration
-grpc:
-  client:
-    quarkus-user-service:
-      address: 'static://localhost:9090'
-      negotiationType: plaintext
-      keepAliveTime: 30s
-      keepAliveTimeout: 5s
-      keepAliveWithoutCalls: true
-      maxInboundMessageSize: 4194304
-      # Add these if you're having connection issues
-      enableRetry: true
-      maxRetryAttempts: 3
-      
-# Alternative configuration if using discovery
-    quarkus-user-service-discovery:
-      address: 'discovery:///user-service'  # If using service discovery
-      negotiationType: plaintext
-
-# Enable debug logging
-logging:
-  level:
-    io.grpc: DEBUG
-    net.devh.boot.grpc.client: DEBUG
-    com.yourcompany.apibridge: DEBUG
-*/
-
-// ============================================================================
-// STEP 3: Improved gRPC Client Implementation
+// ENHANCED gRPC CLIENT SERVICE WITH CUSTOM CONFIGURATION
 // ============================================================================
 
 @Service
 @Slf4j
 public class QuarkusUserClient {
 
-    @GrpcClient("quarkus-user-service")
-    private UserServiceGrpc.UserServiceBlockingStub userServiceStub;
+    private final UserServiceGrpc.UserServiceBlockingStub blockingStub;
+    private final UserServiceGrpc.UserServiceStub asyncStub;
+    private final ManagedChannel channel;
+    private final GrpcClientProperties properties;
+    private final MeterRegistry meterRegistry;
+    
+    // Connection metrics for POC testing
+    private final Counter connectionReuseCounter;
+    private final Timer callDurationTimer;
+    private final Gauge connectionStateGauge;
 
-    @GrpcClient("quarkus-user-service")
-    private UserServiceGrpc.UserServiceStub userServiceAsyncStub;
-    
-    // Add channel for connection monitoring
-    @GrpcClient("quarkus-user-service")
-    private Channel channel;
-    
-    @PostConstruct
-    public void init() {
-        log.info("QuarkusUserClient initialized");
-        // Test connection on startup (optional)
-        testConnection();
-    }
-    
-    private void testConnection() {
-        try {
-            // Simple connectivity test
-            ConnectivityState state = ((ManagedChannel) channel).getState(true);
-            log.info("gRPC Channel initial state: {}", state);
-        } catch (Exception e) {
-            log.warn("Could not test gRPC connection on startup: {}", e.getMessage());
+    public QuarkusUserClient(@Qualifier("quarkusUserServiceChannel") ManagedChannel channel,
+                           GrpcClientProperties properties,
+                           @Autowired(required = false) MeterRegistry meterRegistry) {
+        this.channel = channel;
+        this.properties = properties;
+        this.meterRegistry = meterRegistry;
+        
+        // Create stubs with custom configuration
+        this.blockingStub = UserServiceGrpc.newBlockingStub(channel)
+                .withDeadlineAfter(10, TimeUnit.SECONDS);
+        this.asyncStub = UserServiceGrpc.newStub(channel)
+                .withDeadlineAfter(10, TimeUnit.SECONDS);
+        
+        // Initialize metrics for POC testing
+        if (meterRegistry != null) {
+            this.connectionReuseCounter = Counter.builder("grpc.connection.reuse")
+                    .description("Number of times gRPC connection was reused")
+                    .tag("service", "user-service")
+                    .register(meterRegistry);
+                    
+            this.callDurationTimer = Timer.builder("grpc.call.duration")
+                    .description("Duration of gRPC calls")
+                    .tag("service", "user-service")
+                    .register(meterRegistry);
+                    
+            this.connectionStateGauge = Gauge.builder("grpc.connection.state")
+                    .description("Current connection state")
+                    .tag("service", "user-service")
+                    .register(meterRegistry, this, client -> getConnectionStateValue());
+        } else {
+            this.connectionReuseCounter = null;
+            this.callDurationTimer = null;
+            this.connectionStateGauge = null;
         }
     }
 
     public UserProto.User createUser(UserProto.CreateUserRequest request) {
+        Timer.Sample sample = callDurationTimer != null ? Timer.start(meterRegistry) : null;
+        
         try {
-            // Check connection state before making call
-            ConnectivityState state = ((ManagedChannel) channel).getState(false);
-            log.debug("Channel state before call: {}", state);
+            logConnectionReuse();
             
-            return userServiceStub.createUser(request);
+            UserProto.User result = blockingStub.createUser(request);
+            
+            if (connectionReuseCounter != null) {
+                connectionReuseCounter.increment();
+            }
+            
+            return result;
+            
         } catch (StatusRuntimeException e) {
-            log.error("gRPC call failed with status: {} - {}", e.getStatus().getCode(), e.getStatus().getDescription());
+            log.error("gRPC call failed - Status: {}, Description: {}", 
+                     e.getStatus().getCode(), e.getStatus().getDescription());
             throw new GrpcServiceException("User creation failed", "user-service", e);
         } catch (Exception e) {
-            log.error("Unexpected error calling user service", e);
+            log.error("Unexpected error in gRPC call", e);
             throw new QuarkusServiceUnavailableException("user-service", e);
-        }
-    }
-    
-    // Add health check method
-    public boolean isServiceAvailable() {
-        try {
-            ConnectivityState state = ((ManagedChannel) channel).getState(false);
-            return state == ConnectivityState.READY || state == ConnectivityState.IDLE;
-        } catch (Exception e) {
-            log.warn("Error checking service availability: {}", e.getMessage());
-            return false;
-        }
-    }
-}
-
-// ============================================================================
-// STEP 4: Add Connection Health Check
-// ============================================================================
-
-@Component
-@Slf4j
-public class GrpcConnectionHealthCheck {
-
-    @Autowired
-    private QuarkusUserClient userClient;
-    
-    @EventListener(ApplicationReadyEvent.class)
-    public void onApplicationReady() {
-        // Check connections after application starts
-        checkConnections();
-    }
-    
-    @Scheduled(fixedRate = 30000) // Check every 30 seconds
-    public void checkConnections() {
-        boolean isAvailable = userClient.isServiceAvailable();
-        log.info("Quarkus User Service availability: {}", isAvailable);
-        
-        if (!isAvailable) {
-            log.warn("Quarkus User Service is not available");
-            // Could implement alerting here
-        }
-    }
-}
-
-// ============================================================================
-// STEP 5: Conditional Bean Creation (Fallback Strategy)
-// ============================================================================
-
-@Configuration
-public class GrpcClientConditionalConfig {
-
-    @Bean
-    @ConditionalOnProperty(name = "grpc.client.fallback.enabled", havingValue = "true")
-    public QuarkusUserClient fallbackUserClient() {
-        return new QuarkusUserClientFallback();
-    }
-    
-    // Fallback implementation when gRPC is not available
-    @Component
-    @ConditionalOnProperty(name = "grpc.client.fallback.enabled", havingValue = "true")
-    public static class QuarkusUserClientFallback extends QuarkusUserClient {
-        
-        @Override
-        public UserProto.User createUser(UserProto.CreateUserRequest request) {
-            log.warn("Using fallback - gRPC service not available");
-            throw new QuarkusServiceUnavailableException("user-service");
-        }
-        
-        @Override
-        public boolean isServiceAvailable() {
-            return false;
-        }
-    }
-}
-
-// ============================================================================
-// STEP 6: Startup Connection Test
-// ============================================================================
-
-@Component
-@Slf4j
-public class GrpcStartupValidator implements ApplicationRunner {
-
-    @Autowired(required = false)
-    private QuarkusUserClient userClient;
-
-    @Override
-    public void run(ApplicationArguments args) throws Exception {
-        if (userClient != null) {
-            log.info("Testing gRPC connections on startup...");
-            
-            try {
-                boolean available = userClient.isServiceAvailable();
-                
-                if (available) {
-                    log.info("✅ gRPC connection to Quarkus User Service: SUCCESS");
-                } else {
-                    log.warn("⚠️ gRPC connection to Quarkus User Service: NOT READY");
-                }
-                
-            } catch (Exception e) {
-                log.error("❌ gRPC connection test failed: {}", e.getMessage());
-                // Don't fail startup, just log the issue
+        } finally {
+            if (sample != null) {
+                sample.stop(callDurationTimer);
             }
         }
     }
+
+    public CompletableFuture<UserProto.User> createUserAsync(UserProto.CreateUserRequest request) {
+        CompletableFuture<UserProto.User> future = new CompletableFuture<>();
+        Timer.Sample sample = callDurationTimer != null ? Timer.start(meterRegistry) : null;
+        
+        logConnectionReuse();
+        
+        asyncStub.createUser(request, new StreamObserver<UserProto.User>() {
+            @Override
+            public void onNext(UserProto.User user) {
+                future.complete(user);
+                if (connectionReuseCounter != null) {
+                    connectionReuseCounter.increment();
+                }
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                if (throwable instanceof StatusRuntimeException) {
+                    future.completeExceptionally(
+                        new GrpcServiceException("Async user creation failed", "user-service", throwable));
+                } else {
+                    future.completeExceptionally(
+                        new QuarkusServiceUnavailableException("user-service", throwable));
+                }
+            }
+
+            @Override
+            public void onCompleted() {
+                if (sample != null) {
+                    sample.stop(callDurationTimer);
+                }
+            }
+        });
+
+        return future;
+    }
+
+    // POC Testing Methods
+    public ConnectionInfo getConnectionInfo() {
+        ConnectivityState state = channel.getState(false);
+        return ConnectionInfo.builder()
+                .state(state.name())
+                .isReady(state == ConnectivityState.READY)
+                .channelHashCode(channel.hashCode())
+                .connectionReuseCount(connectionReuseCounter != null ? 
+                    (long) connectionReuseCounter.count() : 0)
+                .build();
+    }
+
+    public boolean testConnection() {
+        try {
+            // Force connection state check
+            ConnectivityState state = channel.getState(true);
+            log.info("Connection test - State: {}", state);
+            return state == ConnectivityState.READY || state == ConnectivityState.CONNECTING;
+        } catch (Exception e) {
+            log.error("Connection test failed", e);
+            return false;
+        }
+    }
+
+    public void forceReconnect() {
+        try {
+            channel.resetConnectBackoff();
+            log.info("Forced channel reconnection");
+        } catch (Exception e) {
+            log.error("Failed to force reconnection", e);
+        }
+    }
+
+    private void logConnectionReuse() {
+        if (properties.getPocTest().isEnableDetailedLogging()) {
+            ConnectivityState state = channel.getState(false);
+            log.debug("Using gRPC connection - State: {}, Channel: {}", 
+                     state, channel.hashCode());
+        }
+    }
+
+    private double getConnectionStateValue() {
+        ConnectivityState state = channel.getState(false);
+        return switch (state) {
+            case READY -> 1.0;
+            case CONNECTING -> 0.5;
+            case IDLE -> 0.3;
+            case TRANSIENT_FAILURE -> -0.5;
+            case SHUTDOWN -> -1.0;
+        };
+    }
+
+    @Data
+    @Builder
+    public static class ConnectionInfo {
+        private String state;
+        private boolean isReady;
+        private int channelHashCode;
+        private long connectionReuseCount;
+    }
 }
 
 // ============================================================================
-// STEP 7: Debug Configuration
+// CUSTOM INTERCEPTORS FOR POC TESTING
 // ============================================================================
 
-@Configuration
-@Profile("debug")
-public class GrpcDebugConfig {
+public class ConnectionMonitoringInterceptor implements ClientInterceptor {
+    
+    private final String serviceName;
+    private final AtomicLong callCount = new AtomicLong(0);
+    
+    public ConnectionMonitoringInterceptor(String serviceName) {
+        this.serviceName = serviceName;
+    }
 
-    @Bean
-    public ClientInterceptor grpcDebugInterceptor() {
-        return new ClientInterceptor() {
+    @Override
+    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
+            MethodDescriptor<ReqT, RespT> method, 
+            CallOptions callOptions, 
+            Channel next) {
+        
+        long callId = callCount.incrementAndGet();
+        log.debug("gRPC Call #{} to {}: {}", callId, serviceName, method.getFullMethodName());
+        
+        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
+                next.newCall(method, callOptions)) {
+            
             @Override
-            public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
-                    MethodDescriptor<ReqT, RespT> method, 
-                    CallOptions callOptions, 
-                    Channel next) {
+            public void start(Listener<RespT> responseListener, Metadata headers) {
+                headers.put(Metadata.Key.of("call-id", Metadata.ASCII_STRING_MARSHALLER), 
+                           String.valueOf(callId));
+                headers.put(Metadata.Key.of("service-name", Metadata.ASCII_STRING_MARSHALLER), 
+                           serviceName);
                 
-                log.debug("gRPC Call: {}", method.getFullMethodName());
-                
-                return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
-                        next.newCall(method, callOptions)) {
-                    
+                super.start(new ForwardingClientCallListener.SimpleForwardingClientCallListener<RespT>(responseListener) {
                     @Override
-                    public void start(Listener<RespT> responseListener, Metadata headers) {
-                        log.debug("Starting call to: {}", method.getFullMethodName());
-                        super.start(new ForwardingClientCallListener.SimpleForwardingClientCallListener<RespT>(responseListener) {
-                            @Override
-                            public void onClose(Status status, Metadata trailers) {
-                                log.debug("Call completed with status: {}", status);
-                                super.onClose(status, trailers);
-                            }
-                        }, headers);
+                    public void onClose(Status status, Metadata trailers) {
+                        log.debug("gRPC Call #{} completed - Status: {}", callId, status.getCode());
+                        super.onClose(status, trailers);
                     }
-                };
+                }, headers);
             }
         };
     }
 }
 
-// ============================================================================
-// COMMON SOLUTIONS CHECKLIST
-// ============================================================================
+public class RetryInterceptor implements ClientInterceptor {
+    
+    private final int maxRetryAttempts;
+    
+    public RetryInterceptor(int maxRetryAttempts) {
+        this.maxRetryAttempts = maxRetryAttempts;
+    }
 
-/*
-TROUBLESHOOTING CHECKLIST:
-
-1. ✅ QUARKUS SERVICE RUNNING?
-   - Check if your Quarkus application is running on the expected port
-   - Test: telnet localhost 9090
-
-2. ✅ CORRECT PORT CONFIGURATION?
-   - Verify port in application.yml matches Quarkus gRPC port
-   - Check: netstat -an | grep 9090
-
-3. ✅ FIREWALL/NETWORK ISSUES?
-   - Ensure no firewall blocking the connection
-   - Try connecting from same machine first
-
-4. ✅ PROTO COMPATIBILITY?
-   - Ensure proto files are identical between Spring Boot and Quarkus
-   - Check generated classes are up to date
-
-5. ✅ DEPENDENCIES CORRECT?
-   - Check Spring Boot gRPC starter version compatibility
-   - Verify all required dependencies are present
-
-6. ✅ PLAINTEXT VS TLS?
-   - Ensure both client and server use same security configuration
-   - Use 'negotiationType: plaintext' for local development
-
-7. ✅ SERVICE NAME MATCHING?
-   - @GrpcClient("service-name") must match configuration key
-   - Case sensitive!
-
-8. ✅ SPRING BOOT VERSION COMPATIBILITY?
-   - Check compatibility matrix for grpc-spring-boot-starter
-
-QUICK FIXES:
-
-1. Simplify configuration - remove custom beans
-2. Add 'negotiationType: plaintext' 
-3. Check service is actually running
-4. Enable debug logging
-5. Add connection health checks
-6. Use fallback strategies for development
-
-DEVELOPMENT TIPS:
-
-1. Start Quarkus service first
-2. Enable debug logging during development
-3. Use health checks to monitor connections
-4. Implement graceful degradation
-5. Add retry mechanisms for production
-*/
+    @Override
+    public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
+            MethodDescriptor<ReqT, RespT> method, 
+            CallOptions callOptions, 
+            Channel next) {
+        
+        return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
+                next.newCall(method, callOptions)) {
+            
+            private int attemptCount = 0;
+            
+            @Override
+            public void start(Listener<RespT> responseListener, Metadata headers) {
+                super.start(new ForwardingClientCallListener.SimpleForwardingClientCallListener<RespT>(responseListener) {
+                    @Override
+                    public void onClose(Status status, Metadata trailers) {
+                        if (shouldRetry(status) && attemptCount < maxRetryAttempts) {
+                            attemptCount++;
+                            log.warn("Retrying gRPC call {} (attempt {}/{})", 
+                                   method.getFullMethodName(), attemptCount, maxRetryAttempts);
+                            // Implement retry logic here
+                        }
+                        super.onClose(status, trailers);
+                    }
+                }, headers);
+            }
+            
+            private boolean shouldRetry(Status status) {
+                return status.getCode() == Status.Code.UNAVAILABLE ||
+                       status.getCode() == Status.Code.DEADLINE_EXCEEDED;
+            }
+        };
+    }
+}
