@@ -1,0 +1,39 @@
+@RestController
+@RequestMapping("/api/notifications")
+public class NotificationController {
+
+    private final SseEmitter.SseEventBuilder HEARTBEAT_EVENT = 
+        SseEmitter.event().name("heartbeat").data("ping");
+
+    @GetMapping("/stream")
+    public SseEmitter streamNotifications() {
+        SseEmitter emitter = new SseEmitter(0L); // No timeout
+        
+        // Schedule heartbeat every 30 seconds
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+        ScheduledFuture<?> heartbeat = executor.scheduleAtFixedRate(() -> {
+            try {
+                emitter.send(HEARTBEAT_EVENT);
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+                executor.shutdown();
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+
+        // Handle completion/error
+        emitter.onCompletion(() -> {
+            heartbeat.cancel(true);
+            executor.shutdown();
+        });
+        
+        emitter.onError((ex) -> {
+            heartbeat.cancel(true);
+            executor.shutdown();
+        });
+
+        // Register emitter for notifications
+        NotificationService.registerEmitter(emitter);
+        
+        return emitter;
+    }
+}
