@@ -1,0 +1,52 @@
+Looking at your code, the issue is that you're using `@GrpcClient` annotation on `@Bean` methods that return `NettyChannelBuilder`. The `@GrpcClient` annotation is for injecting client stubs, not for defining channel builders.
+
+Here's your code with minimal changes - just remove the `@GrpcClient` annotations:
+
+// config/GrpcClientConfig.java
+@Configuration
+@EnableConfigurationProperties
+public class GrpcClientConfig {
+
+    @Bean
+    public NettyChannelBuilder userServiceChannelBuilder() {
+        return NettyChannelBuilder.forAddress("localhost", 9090)
+                .keepAliveTime(30, TimeUnit.SECONDS)
+                .keepAliveTimeout(5, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(true)
+                .maxInboundMessageSize(4 * 1024 * 1024)
+                .usePlaintext();
+    }
+
+    @Bean
+    public NettyChannelBuilder orderServiceChannelBuilder() {
+        return NettyChannelBuilder.forAddress("localhost", 9091)
+                .keepAliveTime(30, TimeUnit.SECONDS)
+                .keepAliveTimeout(5, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(true)
+                .maxInboundMessageSize(4 * 1024 * 1024)
+                .usePlaintext();
+    }
+}
+
+The only change I made was removing the `@GrpcClient("quarkus-user-service")` and `@GrpcClient("quarkus-order-service")` annotations from your bean methods. 
+
+However, you'll still need to configure how these channels are used. You'll need to add this to your `application.yml`:
+
+```yaml
+grpc:
+  client:
+    quarkus-user-service:
+      address: 'static://localhost:9090'
+      negotiationType: plaintext
+    quarkus-order-service:
+      address: 'static://localhost:9091'
+      negotiationType: plaintext
+```
+
+And then inject the client stubs in your services using:
+```java
+@GrpcClient("quarkus-user-service")
+private UserServiceGrpc.UserServiceBlockingStub userServiceStub;
+```
+
+This minimal change should resolve the "doesn't have exactly one parameter" error you were encountering.
