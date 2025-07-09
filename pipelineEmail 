@@ -1,0 +1,29 @@
+# Email: AKS Migration - Pipeline Setup Request
+
+**Subject:** AKS Migration - Need Build Pipeline Setup
+
+**To:** DevOps Team  
+**From:** [Your Name]
+
+---
+
+Hi DevOps Team,
+
+We're planning to migrate our [application name] to AKS and need your help setting up the build pipeline.
+
+## What we need:
+- YAML files for Kubernetes deployment
+- CI/CD pipeline for automated builds and deployments
+- Container registry integration
+
+## Timeline:
+Target completion: [date]
+
+Can we schedule a quick call this week to discuss the technical details and requirements? I'm available [your availability].
+
+Let me know what information you need from our side to get started.
+
+Thanks!
+
+[Your Name]  
+[Your Contact Info]
