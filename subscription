@@ -1,0 +1,143 @@
+Here's a complete Observable solution using RxJS operators to filter and find the record with null end date and latest start date:Observable Solution with RxJSimport { Component, OnInit } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+
+interface Record {
+  id: number;
+  startDate: string; // or Date
+  endDate: string | null; // or Date | null
+  // other properties...
+}
+
+@Component({
+  selector: 'app-my-component',
+  templateUrl: './my-component.component.html'
+})
+export class MyComponent implements OnInit {
+  activeRecord$: Observable<Record | null>;
+  activeRecord: Record | null = null;
+
+  constructor(private http: HttpClient) {}
+
+  ngOnInit() {
+    // Solution 1: Using Observable with async pipe in template
+    this.activeRecord$ = this.getActiveRecord();
+
+    // Solution 2: Subscribe and store in component property
+    this.getActiveRecord().subscribe(
+      record => {
+        this.activeRecord = record;
+        console.log('Active record:', record);
+        // Use the record here for any other logic
+      },
+      error => {
+        console.error('Error fetching records:', error);
+      }
+    );
+  }
+
+  getActiveRecord(): Observable<Record | null> {
+    return this.http.get<Record[]>('api/your-endpoint').pipe(
+      map(records => {
+        // Filter records with null end date
+        const activeRecords = records.filter(record => record.endDate === null);
+        
+        // If no active records found
+        if (activeRecords.length === 0) {
+          return null;
+        }
+        
+        // If only one active record
+        if (activeRecords.length === 1) {
+          return activeRecords[0];
+        }
+        
+        // If multiple active records, find the one with latest start date
+        return activeRecords.reduce((latest, current) => {
+          const latestDate = new Date(latest.startDate);
+          const currentDate = new Date(current.startDate);
+          return currentDate > latestDate ? current : latest;
+        });
+      })
+    );
+  }
+}Alternative Solution with More RxJS Operatorsimport { map, filter, reduce } from 'rxjs/operators';
+import { of } from 'rxjs';
+
+getActiveRecord(): Observable<Record | null> {
+  return this.http.get<Record[]>('api/your-endpoint').pipe(
+    // First, handle empty array case
+    map(records => records.length > 0 ? records : []),
+    
+    // Filter to get only records with null end date
+    map(records => records.filter(record => record.endDate === null)),
+    
+    // Find the record with the latest start date
+    map(activeRecords => {
+      if (activeRecords.length === 0) {
+        return null;
+      }
+      
+      return activeRecords.sort((a, b) => {
+        // Sort in descending order (latest first)
+        return new Date(b.startDate).getTime() - new Date(a.startDate).getTime();
+      })[0]; // Get the first element (latest date)
+    })
+  );
+}Using in Template with Async Pipe<!-- my-component.component.html -->
+<div *ngIf="activeRecord$ | async as record; else noRecord">
+  <h3>Active Record</h3>
+  <p>ID: {{ record.id }}</p>
+  <p>Start Date: {{ record.startDate | date }}</p>
+  <p>Status: Active (No end date)</p>
+</div>
+
+<ng-template #noRecord>
+  <p>No active record found</p>
+</ng-template>Complete Service Implementation// record.service.ts
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable, BehaviorSubject } from 'rxjs';
+import { map, tap, catchError } from 'rxjs/operators';
+import { of } from 'rxjs';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class RecordService {
+  private activeRecordSubject = new BehaviorSubject<Record | null>(null);
+  public activeRecord$ = this.activeRecordSubject.asObservable();
+
+  constructor(private http: HttpClient) {}
+
+  fetchAndSetActiveRecord(): Observable<Record | null> {
+    return this.http.get<Record[]>('api/your-endpoint').pipe(
+      map(records => this.findActiveRecord(records)),
+      tap(record => {
+        // Store in BehaviorSubject for sharing across components
+        this.activeRecordSubject.next(record);
+      }),
+      catchError(error => {
+        console.error('Error fetching records:', error);
+        return of(null);
+      })
+    );
+  }
+
+  private findActiveRecord(records: Record[]): Record | null {
+    // Get all records with null end date
+    const activeRecords = records.filter(r => r.endDate === null);
+    
+    if (activeRecords.length === 0) {
+      return null;
+    }
+    
+    // Find the one with the latest start date
+    return activeRecords.reduce((latest, current) => {
+      const latestTime = new Date(latest.startDate).getTime();
+      const currentTime = new Date(current.startDate).getTime();
+      return currentTime > latestTime ? current : latest;
+    });
+  }
+}Using the Service in Component
