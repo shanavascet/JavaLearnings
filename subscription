@@ -1,25 +1,33 @@
-import { map } from 'rxjs/operators';
-
-function getActiveSubscriptionObservable(userDetail: GetClientIDSearchRequest, from?: string) {
-    return this.subscriptionsService.GetSubscriptions(userDetail, from).pipe(
-        map(response => {
-            // Filter records where endDate is null
-            const activeSubscriptions = response.data?.filter(subscription => 
-                subscription.endDate === null || subscription.endDate === undefined
-            ) || [];
-            
-            if (activeSubscriptions.length === 0) {
-                return { ...response, data: [] };
-            }
-            
-            // Select the one with latest startDate
-            const latestSubscription = activeSubscriptions.reduce((latest, current) => {
-                const latestDate = new Date(latest.startDate);
-                const currentDate = new Date(current.startDate);
-                return currentDate > latestDate ? current : latest;
-            });
-            
-            return { ...response, data: [latestSubscription] };
-        })
-    );
+async function getActiveSubscription(userDetail: GetClientIDSearchRequest, from?: string) {
+    try {
+        const response = await this.subscriptionsService.GetSubscriptions(userDetail, from);
+        
+        // Check if response and data exist
+        if (!response || !response.data || !Array.isArray(response.data)) {
+            console.log('No subscription data found');
+            return null;
+        }
+        
+        // Filter records where endDate is null
+        const activeSubscriptions = response.data.filter((subscription: any) => 
+            subscription.endDate === null || subscription.endDate === undefined
+        );
+        
+        if (activeSubscriptions.length === 0) {
+            console.log('No active subscriptions found');
+            return null;
+        }
+        
+        // If multiple records, select the one with latest startDate
+        const latestSubscription = activeSubscriptions.reduce((latest: any, current: any) => {
+            const latestDate = new Date(latest.startDate);
+            const currentDate = new Date(current.startDate);
+            return currentDate > latestDate ? current : latest;
+        });
+        
+        return latestSubscription;
+    } catch (error) {
+        console.error('Error getting active subscription:', error);
+        throw error;
+    }
 }
