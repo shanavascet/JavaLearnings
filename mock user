@@ -1,0 +1,99 @@
+public class MockUserProfile extends UserProfile {
+    private String webId = "LTASL3";
+    private String employeeId = "49855";
+    private String name = "LTASL3 LTASL3";
+    private String emailAddress = "consanthin.jegan@bbh.com";
+    private String userTypeCode = "BE";
+    private String bids2000Id = "B123456";
+    private String hyperionId = "DDRTEAM";
+    private String ssolserIndicator = "Y";
+    private String internalClientTeamId = "III";
+    private String externalClientTeamId = "BBH1";
+    private String locale = "en_US_BBH";
+    private String brandId = "BBH";
+    private String timezone = "US/Eastern";
+    private String userPrefTimeZone = "US/Eastern";
+    
+    // Implement all abstract getter methods
+    @Override
+    public String getWebId() {
+        return webId;
+    }
+    
+    @Override
+    public String getEmployeeId() {
+        return employeeId;
+    }
+    
+    @Override
+    public String getName() {
+        return name;
+    }
+    
+    @Override
+    public String getEmailAddress() {
+        return emailAddress;
+    }
+    
+    @Override
+    public String getUserTypeCode() {
+        return userTypeCode;
+    }
+
+    @Override
+    public String getBids2000Id() {
+        return bids2000Id;
+    }
+
+    @Override
+    public String getHyperionId() {
+        return hyperionId;
+    }
+
+    @Override
+    public String getSsolserIndicator() {
+        return ssolserIndicator;
+    }
+
+    @Override
+    public String getInternalClientTeamId() {
+        return internalClientTeamId;
+    }
+
+    @Override
+    public String getExternalClientTeamId() {
+        return externalClientTeamId;
+    }
+
+    @Override
+    public String getLocale() {
+        return locale;
+    }
+
+    @Override
+    public String getBrandId() {
+        return brandId;
+    }
+
+    @Override
+    public String getTimezone() {
+        return timezone;
+    }
+
+    @Override
+    public String getUserPrefTimeZone() {
+        return userPrefTimeZone;
+    }
+
+    // Note: If UserProfile has other abstract methods (like setters or methods for
+    // more complex data), you would need to implement those as well.
+    // For a mock object, you would typically implement them to either do nothing 
+    // or return a hardcoded/dummy value.
+}
+_-----+++++
+
+// Utility method to manually set user in session for testing
+public static void setupMockUserInSession(HttpServletRequest request) {
+    UserProfile mockUser = new MockUserProfile();
+    request.getSession().setAttribute("USER_PROFILE_SESSION_KEY", mockUser);
+}
