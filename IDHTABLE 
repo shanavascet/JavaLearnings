@@ -1,0 +1,118 @@
+[
+  {
+    "tableName": "DOCUMENT_TYPE_MAPPING",
+    "columns": [
+      {
+        "clientIdentifier": "ADI",
+        "virtualTableName": "DOCUMENT_TYPE_MAPPING",
+        "columnKey": "REQUEST",
+        "virtualColumnName": "REQUEST",
+        "dataType": "Alphanumeric",
+        "mandatory": true,
+        "columnOrder": 0,
+        "refVirtualTableName": null,
+        "refColumnKey": null,
+        "primaryKey": true
+      },
+      {
+        "clientIdentifier": "ADI",
+        "virtualTableName": "DOCUMENT_TYPE_MAPPING",
+        "columnKey": "TASK",
+        "virtualColumnName": "TASK",
+        "dataType": "Alphanumeric",
+        "mandatory": true,
+        "columnOrder": 1,
+        "refVirtualTableName": null,
+        "refColumnKey": null,
+        "primaryKey": true
+      },
+      {
+        "clientIdentifier": "ADI",
+        "virtualTableName": "DOCUMENT_TYPE_MAPPING",
+        "columnKey": "DOCUMENT_TYPE",
+        "virtualColumnName": "DOCUMENT_TYPE",
+        "dataType": "Alphanumeric",
+        "mandatory": true,
+        "columnOrder": 2,
+        "refVirtualTableName": null,
+        "refColumnKey": null,
+        "primaryKey": false
+      }
+    ],
+    "data": [
+      {
+        "REQUEST": "Sender authorization",
+        "TASK": "ADD",
+        "DOCUMENT_TYPE": "Business Justification/Client Instructions"
+      },
+      {
+        "REQUEST": "Sender authorization",
+        "TASK": "ADD",
+        "DOCUMENT_TYPE": "Other"
+      },
+      {
+        "REQUEST": "Sender authorization",
+        "TASK": "REMOVE",
+        "DOCUMENT_TYPE": "Business Justification/Client Instructions"
+      },
+      {
+        "REQUEST": "Sender authorization",
+        "TASK": "REMOVE",
+        "DOCUMENT_TYPE": "Other"
+      }
+    ]
+  },
+  {
+    "tableName": "REFERENCE_DOCUMENTS",
+    "columns": [
+      {
+        "clientIdentifier": "ADI",
+        "virtualTableName": "REFERENCE_DOCUMENTS",
+        "columnKey": "REQUEST",
+        "virtualColumnName": "REQUEST",
+        "dataType": "Alphanumeric",
+        "mandatory": true,
+        "columnOrder": 0,
+        "refVirtualTableName": null,
+        "refColumnKey": null,
+        "primaryKey": true
+      },
+      {
+        "clientIdentifier": "ADI",
+        "virtualTableName": "REFERENCE_DOCUMENTS",
+        "columnKey": "TASK",
+        "virtualColumnName": "TASK",
+        "dataType": "Alphanumeric",
+        "mandatory": true,
+        "columnOrder": 1,
+        "refVirtualTableName": null,
+        "refColumnKey": null,
+        "primaryKey": true
+      },
+      {
+        "clientIdentifier": "ADI",
+        "virtualTableName": "REFERENCE_DOCUMENTS",
+        "columnKey": "PREDEFINED_DOC",
+        "virtualColumnName": "PREDEFINED_DOC",
+        "dataType": "Alphanumeric",
+        "mandatory": true,
+        "columnOrder": 2,
+        "refVirtualTableName": null,
+        "refColumnKey": null,
+        "primaryKey": false
+      }
+    ],
+    "data": [
+      {
+        "REQUEST": "Sender authorization",
+        "TASK": "ADD",
+        "PREDEFINED_DOC": "N"
+      },
+      {
+        "REQUEST": "Sender authorization",
+        "TASK": "REMOVE",
+        "PREDEFINED_DOC": "N"
+      }
+    ]
+  }
+]
